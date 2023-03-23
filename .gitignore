@@ -1,0 +1,6 @@
+# virtual environment
+env
+
+# databases
+casos_dengue.txt
+chuvas.csv
