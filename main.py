@@ -45,6 +45,18 @@ def casos_dengue(tupla):
         else:
             yield (f"{uf}-{registro['ano_mes']}", 0.0)
 
+def lista_chave_uf_ano_mes(lista):
+    """
+    Recebe uma lista e retorna uma tupla contendo UF-Ano-Mês e mm de chuva
+    """
+    data, mm, uf = lista
+    ano_mes = '-'.join(data.split('-')[:2])
+
+    if float(mm)<0:
+        mm = 0.0
+    else:
+        mm = round(float(mm), 1)
+    return (f'{uf}-{ano_mes}', mm)
 
 # Lendo o header do arquivo de casos de dengue:
 header_dengue = list(pd.read_csv('casos_dengue.txt', sep='|', nrows=1).columns.values)
@@ -56,15 +68,22 @@ pipeline = beam.Pipeline(options=pipeline_options)
 # Criando a pcollection 'dengue'
 dengue = (
     pipeline
-    | "Leitura do dataset de casos de dengue" >> ReadFromText('casos_dengue.txt', skip_header_lines=1)
-    | "Convertendo texto para lista" >> beam.Map(texto_para_lista, delimitador='|')
-    | "Convertendo lista para dicionários" >> beam.Map(lista_para_dicionario, chaves=header_dengue)
-    | "Criando campo ano_mes" >> beam.Map(trata_data)
-    | "Adiciona a chave da uf junto ao dicionario" >> beam.Map(chave_uf)
-    | "Agrupando por uf" >> beam.GroupByKey()
-    | "Descompactar casos de dengue" >> beam.FlatMap(casos_dengue)
-    | "Somar por uf-ano-mes" >> beam.CombinePerKey(sum)
-    | "Mostrar resultados" >> beam.Map(print)
+    | "Dengue - Leitura do dataset" >> ReadFromText('casos_dengue.txt', skip_header_lines=1)
+    | "Dengue - Convertendo texto para lista" >> beam.Map(texto_para_lista, delimitador='|')
+    | "Dengue - Convertendo lista para dicionários" >> beam.Map(lista_para_dicionario, chaves=header_dengue)
+    | "Dengue - Criando campo ano_mes" >> beam.Map(trata_data)
+    | "Dengue - Adiciona a chave da uf junto ao dicionario" >> beam.Map(chave_uf)
+    | "Dengue - Agrupando por uf" >> beam.GroupByKey()
+    | "Dengue - Descompactando" >> beam.FlatMap(casos_dengue)
+    | "Dengue - Somar por uf-ano-mes" >> beam.CombinePerKey(sum)
+)
+
+chuvas = (
+    pipeline
+    | "Chuvas - Leitura do dataset" >> ReadFromText('chuvas.csv', skip_header_lines=1)
+    | "Chuvas - Convertendo texto para lista" >> beam.Map(texto_para_lista, delimitador=',')
+    | "Chuvas - Retornando tupla contando chave uf-ano-mes e mms" >> beam.Map(lista_chave_uf_ano_mes)
+    | "Chuvas - Somar por uf-ano-mes" >> beam.CombinePerKey(sum)
 )
 
 # Rodando a pipeline
