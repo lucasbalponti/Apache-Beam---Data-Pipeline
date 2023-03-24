@@ -2,6 +2,7 @@ import pandas as pd
 import re
 import apache_beam as beam
 from apache_beam.io import ReadFromText
+from apache_beam.io.textio import WriteToText
 from apache_beam.options.pipeline_options import PipelineOptions
 
 # Criando as funções que serão utilizadas na pipeline
@@ -58,6 +59,34 @@ def lista_chave_uf_ano_mes(lista):
         mm = round(float(mm), 1)
     return (f'{uf}-{ano_mes}', mm)
 
+def filtrar_vazios(tupla):
+    """
+    Remove elementos com campos vazios
+    """
+    chave, dados = tupla
+
+    if all((dados['chuvas'], dados['dengue'])):
+        return True
+    else:
+        return False
+
+def descompactar_elementos(tupla):
+    """
+    Descompacta os elementos para campos de uma tupla
+    """
+    chave, dados = tupla
+    chuvas = dados['chuvas'][0]
+    dengue = dados['dengue'][0]
+    uf, ano, mes = chave.split('-')
+
+    return (uf, ano, mes, str(chuvas), str(dengue))
+
+def preparar_csv(tupla, delimitador):
+    """
+    Recebe uma tupla e retorna uma string delimitada
+    """
+    return delimitador.join(tupla)
+
 # Lendo o header do arquivo de casos de dengue:
 header_dengue = list(pd.read_csv('casos_dengue.txt', sep='|', nrows=1).columns.values)
 
@@ -78,6 +107,7 @@ dengue = (
     | "Dengue - Somar por uf-ano-mes" >> beam.CombinePerKey(sum)
 )
 
+# Criando a pcollection 'chuvas'
 chuvas = (
     pipeline
     | "Chuvas - Leitura do dataset" >> ReadFromText('chuvas.csv', skip_header_lines=1)
@@ -85,6 +115,22 @@ chuvas = (
     | "Chuvas - Retornando tupla contando chave uf-ano-mes e mms" >> beam.Map(lista_chave_uf_ano_mes)
     | "Chuvas - Somar por uf-ano-mes" >> beam.CombinePerKey(sum)
 )
+
+# Criando a pcollection 'resultado'
+resultado = (
+    ({'chuvas': chuvas, 'dengue': dengue})
+    | "Resultados - Agrupando valores pelo dicionário" >> beam.CoGroupByKey()
+    | "Resultados - Filtrando dados vazios" >> beam.Filter(filtrar_vazios)
+    | "Resultados - Descompactando elementos" >> beam.Map(descompactar_elementos)
+    | "Resultados - Prepara csv" >> beam.Map(preparar_csv, delimitador=';')
+)
+
+
+#Criando Header para exportação
+header = 'UF; ANO; MES; CHUVA; DENGUE'
+
+# Exportando os dados
+resultado | "Escrevendo o resultado em um arquivo" >> WriteToText('resultado', file_name_suffix='.csv', header = header)
 
 # Rodando a pipeline
 pipeline.run()
